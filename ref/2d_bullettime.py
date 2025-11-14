@@ -107,8 +107,6 @@ def find_most_similar_pose(reference_pose, candidate_poses):
     return distances, best_idx
     # return distances
 
-
-
 # 人物ごとの注視画像を生成
 def generate_bullettimeimg(img_info):
     for cam_num, img in enumerate(img_info):

@@ -1,12 +1,14 @@
+# Todo: 変数名をリファクタリング
+# Todo: リアルタイム処理を想定しているため、画像出力の処理が冗長？バレットタイムように調整
+
 import math
 import numpy as np
 import cv2
-import pdb
 
 class E2P:
     def __init__(self, _src_size_w, _src_size_h, _dst_w, _dst_h):
 
-        # 魚眼画像の大きさ
+        # 全方位画像の大きさ
         self.Sw = _src_size_w
         self.Sh = _src_size_h
 
@@ -105,7 +107,3 @@ class E2P:
     #
     def generate_image(self, src_img):
         return cv2.remap(src_img, self.map_u, self.map_v, self.interp_method)
-
-# 角度の単位変換
-def DEG2RAD(a):
-    return a * np.pi / 180.0
