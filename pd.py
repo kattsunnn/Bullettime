@@ -5,6 +5,15 @@ import numpy as np
 from typing import Type
 
 class PD:
+
+    pose_detector = None
+
+    # 画像ごとに推論モデルを呼ぶとメモリを圧迫するため、クラス変数として保持
+    @staticmethod
+    def init_pose_detector():
+        if PD.pose_detector is None:
+            PD.pose_detector = mpPose.Pose(static_image_mode=True)
+
     @staticmethod
     def convert_BGR2RGB(img_BGR) -> np.array:
         img_RGB = cv2.cvtColor(img_BGR, cv2.COLOR_BGR2RGB)
@@ -16,14 +25,14 @@ class PD:
         return img_BGR
 
     def __init__(self, img):
+        PD.init_pose_detector()
         self.img = PD.convert_BGR2RGB(img)
         self.img_h = img.shape[0]
         self.img_w = img.shape[1]
         self.detection_result = self.detect_pose()
 
     def detect_pose(self) -> Type:
-        poseDetector = mpPose.Pose(static_image_mode=True)
-        detection_result = poseDetector.process(self.img)
+        detection_result = PD.pose_detector.process(self.img)
         return detection_result
 
     def is_pose_detected(self) -> bool:

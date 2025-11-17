@@ -56,6 +56,7 @@ def generate_ppi(img_e, theta_eye, phi_eye, scale=1, fov=FOV):
     ppi = view.generate_image(img_e)
     return PPI(img_e, ppi, theta_eye, phi_eye)
 
+# スケールから適切なFOVを計算。
 def calc_optimal_fov_from_scale(ppi, scale):
     focal_length = ppi.get_focal_length()
     w = ppi.get_ppi_w()
@@ -104,6 +105,12 @@ def scaling_person_by_height(ppi, k=2):
         H_b = maxXY[1] - minXY[1]
         H_i = ppi.get_ppi_h()
         ppi_scale = H_i/(k * H_b)
+        # 解像度を一定に保ちたい場合。
+        # scaled_ppi = generate_ppi(  ppi.get_src_img(), 
+        #                             ppi.get_angle_u(),
+        #                             ppi.get_angle_v(),
+        #                             scale=ppi_scale) 
+        # スケールに応じて解像度を自動調節
         scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
         scaled_ppi = generate_ppi(  ppi.get_src_img(), 
                                     ppi.get_angle_u(),
@@ -137,15 +144,24 @@ def generate_bullettime(img):
     scaled_ppis = list(filter(None, map(scaling_person_by_height, gaze_ppis)))
     return [ppi.get_ppi() for ppi in scaled_ppis]
 
+# 中間結果を出力する
 def generate_bullettime_dubug(output_path, file_name_pattern, img):
     ppis = generate_front_ppis(img)
 
     # 骨格検出結果
+    if ppis == None: 
+        return
+    pd_result = []
     for ppi in ppis:
         pose_detector_for_ppi = PD(ppi.get_ppi())
         if pose_detector_for_ppi.is_pose_detected():
             ppi_with_landmarks = pose_detector_for_ppi.draw_pose_landmarks()
-            save_imgs(output_path, f"{file_name_pattern}_0_pd_result", ppi_with_landmarks)
+            pd_result.append(ppi_with_landmarks)
+    if pd_result == []:
+        return
+    save_imgs(output_path, f"{file_name_pattern}_0_pd_result_{{}}", pd_result)
+    save_imgs(f"{output_path}/pd_result", f"{file_name_pattern}_{{}}", pd_result)
+
 
     collect_gaze_point_candidate = collect_gaze_point_candidates(ppis)
     if collect_gaze_point_candidate.size == 0:
@@ -155,18 +171,32 @@ def generate_bullettime_dubug(output_path, file_name_pattern, img):
     gaze_ppis = [ generate_ppi(img, cp[0], cp[1]-90) for cp in centered_points ]
 
     # スケール前
+    if gaze_ppis == None: 
+        return
+    before_scale = []
     for ppi in gaze_ppis:
         pose_detector_for_ppi = PD(ppi.get_ppi())
         if pose_detector_for_ppi.is_pose_detected():
             ppi_with_landmarks = pose_detector_for_ppi.draw_pose_landmarks()
-            save_imgs(output_path, f"{file_name_pattern}_1_before_scale", ppi_with_landmarks)
+            before_scale.append(ppi_with_landmarks)
+    if before_scale == []:
+        return
+    save_imgs(output_path, f"{file_name_pattern}_1_before_scale_{{}}", before_scale)
+    save_imgs(f"{output_path}/before_scale", f"{file_name_pattern}_{{}}", before_scale)
 
     scaled_ppis = list(filter(None, map(scaling_person_by_height, gaze_ppis)))
 
     # スケール後
+    if scaled_ppis == None: 
+        return
+    after_scale = []
     for ppi in scaled_ppis:
         ppi_img = ppi.get_ppi()
-        save_imgs(output_path, f"{file_name_pattern}_2_after_scale", ppi_img)
+        after_scale.append(ppi_img)
+    if after_scale == []:
+        return
+    save_imgs(output_path, f"{file_name_pattern}_2_after_scale_{{}}", after_scale)
+    save_imgs(f"{output_path}/after_scale", f"{file_name_pattern}_{{}}", after_scale)
 
 
 # バレットタイム画像を作成
@@ -195,7 +225,215 @@ def generate_bullettime_dubug(output_path, file_name_pattern, img):
 #             bullettime.append(scaled_ppi.get_ppi())
 #     return bullettime
 
-# Todo: ファイル命名の修正。例：01_02.mp4_0002.jpg_0001.jpg
+# 仕様：単一画像・複数画像を処理可能
+def is_grayscale(imgs):
+    # 単一画像をリストに変換
+    imgs = [imgs] if isinstance(imgs, np.ndarray) else imgs
+    is_gray_img = lambda img: isinstance(img, np.ndarray) and len(img.shape) == 2
+    return all(map(is_gray_img, imgs))
+
+def search_most_similar_img_by_sift(query_img_gray, candidate_imgs_gray, ratio_thresh=0.75, match_thresh=5):
+        if is_grayscale(query_img_gray):
+            TypeError("画像ファイルまたはグレースケールではありません")
+        if is_grayscale(candidate_imgs_gray):
+            TypeError("画像ファイルまたはグレースケールではありません")
+        # 特徴抽出器やマッチングアルゴリズムの設定
+        feature_extractor = cv2.SIFT_create()
+        matcher = cv2.BFMatcher(cv2.NORM_L2)
+        best_score = -1
+        best_img = None
+        best_idx = None
+        # クエリ画像の特徴抽出
+        kp_query, des_query = feature_extractor.detectAndCompute(query_img_gray, None)
+        if des_query is None or len(kp_query) < 2:
+            return None
+        # 候補画像群と比較
+        for idx, candidate_img in enumerate(candidate_imgs_gray):
+            # 候補画像の特徴抽出
+            candidate_img_gray = cv2.cvtColor(candidate_img, cv2.COLOR_BGR2GRAY)
+            kp, des = feature_extractor.detectAndCompute(candidate_img_gray, None)
+            if des is None or len(kp) < 2:
+                continue
+            # 特徴点マッチング
+            matches = matcher.knnMatch(des_query, des, k=2)
+            good_matches = [m for m, n in matches if m.distance < ratio_thresh * n.distance]
+            match_score = len(good_matches)
+            # 可視化
+            for i, match in enumerate(good_matches):
+                print(f"Match {i}: Distance = {match.distance:.4f}")
+            print(f"Group{idx}: {match_score}")
+            match_img = cv2.drawMatches(
+                query_img, kp_query, candidate_img, kp, good_matches, None,
+                flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+            )
+            # 保存
+            save_dir = "outputs/matches"
+            os.makedirs(save_dir, exist_ok=True)  # 保存先ディレクトリを作成（存在しない場合）
+            save_path = os.path.join(save_dir, f"match_result_{cam_name}_{idx}.png")
+            cv2.imwrite(save_path, match_img)
+            # 類似画像の更新
+            if match_score > best_score and match_score >= match_thresh:
+                best_score = match_score
+                best_img = candidate_img  # カラー画像を保持
+                best_idx = idx
+
+        return best_img, best_idx, best_score
+    return most_similar_img
+
+def search_similar_img_by_sift_and_colorhist(query_img, candidate_imgs, ratio_thresh=0.75, match_thresh=5):
+    return most_similar_img
+
+
+# 特徴点マッチングを用いた人物の対応付け
+def human_matching_by_featurepoint():
+    # 特徴点を用いた人物対応付け
+    def search_similar_img(query_img, candidate_imgs, ratio_thresh=0.75, match_thresh=5):
+        # カラー画像かチェック
+        if query_img is None or len(query_img.shape) != 3:
+            raise ValueError("query_img must be a valid BGRカラー画像 (3チャンネル)")
+        # 特徴抽出器やマッチングアルゴリズムの設定
+        # feature_extractor = cv2.SIFT_create()
+        feature_extractor = cv2.AKAZE_create(threshold=0.0005)
+        matcher = cv2.BFMatcher(cv2.NORM_L2)
+        best_score = -1
+        best_img = None
+        best_idx = None
+        # 参照画像の特徴抽出
+        query_gray = cv2.cvtColor(query_img, cv2.COLOR_BGR2GRAY)
+        kp_query, des_query = feature_extractor.detectAndCompute(query_gray, None)
+        if des_query is None or len(kp_query) < 2:
+            return None
+        # 候補画像群と比較
+        for idx, candidate_img in enumerate(candidate_imgs):
+            if candidate_img is None or len(img.shape) != 3:
+                continue  # カラー画像でなければスキップ
+            # 候補画像の特徴抽出
+            candidate_img_gray = cv2.cvtColor(candidate_img, cv2.COLOR_BGR2GRAY)
+            kp, des = feature_extractor.detectAndCompute(candidate_img_gray, None)
+            if des is None or len(kp) < 2:
+                continue
+            # 特徴点マッチング
+            matches = matcher.knnMatch(des_query, des, k=2)
+            good_matches = [m for m, n in matches if m.distance < ratio_thresh * n.distance]
+            match_score = len(good_matches)
+            # 可視化
+            for i, match in enumerate(good_matches):
+                print(f"Match {i}: Distance = {match.distance:.4f}")
+            print(f"Group{idx}: {match_score}")
+            match_img = cv2.drawMatches(
+                query_img, kp_query, candidate_img, kp, good_matches, None,
+                flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+            )
+            # 保存
+            save_dir = "outputs/matches"
+            os.makedirs(save_dir, exist_ok=True)  # 保存先ディレクトリを作成（存在しない場合）
+            save_path = os.path.join(save_dir, f"match_result_{cam_name}_{idx}.png")
+            cv2.imwrite(save_path, match_img)
+            # 類似画像の更新
+            if match_score > best_score and match_score >= match_thresh:
+                best_score = match_score
+                best_img = candidate_img  # カラー画像を保持
+                best_idx = idx
+
+        return best_img, best_idx, best_score
+    # ColorHistgramを用いた人物の対応付け
+    def search_similar_img_by_sift_and_colorhist(query_img, candidate_imgs, ratio_thresh=0.75, match_thresh=0.1):
+        # カラー画像チェック
+        if query_img is None or len(query_img.shape) != 3:
+            raise ValueError("query_img must be a valid BGRカラー画像 (3チャンネル)")
+        # 特徴抽出器と特徴マッチング方法を選択
+        feature_extractor = cv2.SIFT_create()
+        matcher = cv2.BFMatcher(cv2.NORM_L2)
+        sift_weight = 0
+        chist_wight = 1
+        # 参照画像の特徴抽出
+        query_gray = cv2.cvtColor(query_img, cv2.COLOR_BGR2GRAY)        
+        kp_query, des_query = feature_extractor.detectAndCompute(query_gray, None)
+        # desが有効か確認
+        if des_query is None or len(kp_query) < 2:
+            return None
+        # 参照画像の色ヒストグラム
+        query_hist = cv2.calcHist([query_img], [0, 1, 2], None, [8, 8, 8],
+                               [0, 256, 0, 256, 0, 256])
+        query_hist_norm = cv2.normalize(query_hist, query_hist).flatten() # スケールの影響を軽減するため正規化
+
+        best_score = -1
+        best_img = None
+        best_idx = None
+
+        for idx, cand_img in enumerate(candidate_imgs):
+            # カラー画像チェック
+            if cand_img is None or len(img.shape) != 3:
+                continue  
+            # 候補画像の特徴抽出
+            cand_gray = cv2.cvtColor(cand_img, cv2.COLOR_BGR2GRAY)
+            kp_cand, des_cand = feature_extractor.detectAndCompute(cand_gray, None)
+            if des_cand is None or len(kp_cand) < 2:
+                continue
+            # マッチング
+            matches = matcher.knnMatch(des_query, des_cand, k=2)
+            good_matches = [m for m, n in matches if m.distance < ratio_thresh * n.distance]
+            match_score = len(good_matches)
+            # 候補画像の色ヒストグラム
+            cand_hist = cv2.calcHist([cand_img], [0, 1, 2], None, [8, 8, 8],
+                                    [0, 256, 0, 256, 0, 256])
+            cand_hist_norm = cv2.normalize(cand_hist, cand_hist).flatten()
+            hist_score = cv2.compareHist(query_hist_norm, cand_hist_norm, cv2.HISTCMP_CORREL)
+            # スコアの合成（SIFTのマッチ数とヒストグラムの類似度）
+            total_score = (match_score * sift_weight) + (hist_score * chist_wight)  
+
+            print(f"Group{idx}: {total_score}")
+            # 可視化
+            match_img = cv2.drawMatches(
+                query_img, kp_query, cand_img, kp_cand, good_matches, None,
+                flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+            )
+            # 保存
+            save_dir = "outputs/matches"
+            os.makedirs(save_dir, exist_ok=True)  # 保存先ディレクトリを作成（存在しない場合）
+            save_path = os.path.join(save_dir, f"match_result_{cam_name}_{idx}.png")
+            cv2.imwrite(save_path, match_img)
+
+            if total_score > best_score and total_score >= match_thresh:
+                best_score = total_score
+                best_img = cand_img  # カラー画像を保持
+                best_idx = idx
+
+        return best_img, best_idx, best_score
+
+    # 参照画像
+    first_reference_path = "outputs/camera_1/camera_1_cropped_ppi_2.jpg"
+    query_img = cv2.imread(first_reference_path)
+    # 候補画像のフォルダ
+    base_dir="outputs"
+
+    for cam_idx in range(1, 10):
+        cam_name = f"camera_{cam_idx}"
+        cam_dir = os.path.join(base_dir, cam_name)
+
+        candidate_files = sorted([
+            f for f in os.listdir(cam_dir)
+            if f.lower().endswith(('.jpg', '.png', '.jpeg'))
+        ])
+
+        candidate_imgs = []
+        for fname in candidate_files:
+            img_path = os.path.join(cam_dir, fname)
+            img = cv2.imread(img_path)
+            candidate_imgs.append(img)
+
+        best_img, best_idx, best_score = search_similar_img(query_img, candidate_imgs)
+
+        if best_img is not None:
+            print(f"{cam_name}| Best: Group{best_idx} | BestScore: {best_score}")
+            # cv2.imshow(f"Best Match in {cam_name}", best_img)  # ← 追加
+            # cv2.waitKey(0)  # キー押下まで待機
+            # cv2.destroyAllWindows()
+            query_img = best_img  # 次の参照画像として更新
+        else:
+            print("can't find a similar image")
+
+
 def save_imgs(output_path, file_name_pattern, imgs, expand=".jpg"):
     os.makedirs(output_path, exist_ok=True)
     for i, img in enumerate(imgs):
@@ -205,8 +443,8 @@ def save_imgs(output_path, file_name_pattern, imgs, expand=".jpg"):
         print(f"{file_path} を保存しました。")
 
 if __name__ == '__main__':
-    input_path = "../input/tennis_center"
-    output_path = "../output/tennis_center_bullettime_opt_fov"
+    input_path = "../input/tennis_serve"
+    output_path = f"../output/tennis_serve_bullettime_fov{FOV}"
     img_paths = glob.glob(os.path.join(input_path, "*.jpg")) 
 
     imgs = []
