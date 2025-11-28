@@ -10,6 +10,17 @@ import search_similar_img as ssi
 import img_utils as iu
 
 FOV = 30
+_map_cache = {}
+
+def get_or_create_map(src_size_w, src_size_h, dst_width, dst_height, theta_eye, phi_eye, fov):
+    cache_key = (src_size_w, src_size_h, dst_width, dst_height, theta_eye, phi_eye, fov)
+    
+    if cache_key not in _map_cache:
+        view = E2P(src_size_w, src_size_h, dst_width, dst_height)
+        view.generate_map(np.deg2rad(theta_eye), np.deg2rad(phi_eye), 0, 1)
+        _map_cache[cache_key] = view
+    
+    return _map_cache[cache_key]
 
 # ToDo: 透視投影画像生成するマップは１回の計算にできそう
 # 透視投影画像群の生成
@@ -20,9 +31,8 @@ def generate_front_ppis(img_e, fov=FOV, overlap=0.5):
     # 表示する透視投影画像の解像度
     dst_width = int(2.0 * np.tan(np.deg2rad(fov) / 2.0) * src_size_w / (2*np.pi))
     dst_height = int(2.0 * np.tan(np.deg2rad(fov) / 2.0) * src_size_h / np.pi)
-
     view = E2P(src_size_w, src_size_h, dst_width, dst_height)
-    
+
     THETA_RANGE = 90
     PHI_RANGE = 60
     angle_step = fov * (1 - overlap)
@@ -121,16 +131,16 @@ def scaling_person_by_height(ppi, k=2):
         H_i = ppi.get_ppi_h()
         ppi_scale = H_i/(k * H_b)
         # 解像度を一定に保ちたい場合。
-        scaled_ppi = generate_ppi(  ppi.get_src_img(), 
-                                    ppi.get_angle_u(),
-                                    ppi.get_angle_v(),
-                                    scale=ppi_scale) 
-        # スケールに応じて解像度を自動調節
-        # scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
         # scaled_ppi = generate_ppi(  ppi.get_src_img(), 
         #                             ppi.get_angle_u(),
         #                             ppi.get_angle_v(),
-        #                             fov= scaling_fov)
+        #                             scale=ppi_scale) 
+        # スケールに応じて解像度を自動調節
+        scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
+        scaled_ppi = generate_ppi(  ppi.get_src_img(), 
+                                    ppi.get_angle_u(),
+                                    ppi.get_angle_v(),
+                                    fov= scaling_fov)
         return scaled_ppi
     
 # 人が透視投影画像に1/kの面積で写る。例： k=2のとき、人が透視投影画像の1/2の面積になる
@@ -157,6 +167,7 @@ def generate_scaled_gaze_img(img):
     centered_points = list(map(centering_points, grouped_points.values()))
     gaze_ppis = [ generate_ppi(img, cp[0], cp[1]-90) for cp in centered_points ]
     scaled_ppis = list(filter(None, map(scaling_person_by_height, gaze_ppis)))
+    scaled_ppis = [ppi for ppi in scaled_ppis if is_gaze_img(ppi.get_ppi())]
     if scaled_ppis == []:
         return None
     return [ppi.get_ppi() for ppi in scaled_ppis]
@@ -196,7 +207,11 @@ def generate_bullettimes(imgs, output_path):
 
 # 中間結果を出力する
 def generate_scaled_gaze_img_debug(img, output_path, file_name_pattern):
+
     ppis = generate_front_ppis(img)
+    # 透視投影画像生成結果
+    ppi_result = [ppi.get_ppi() for ppi in ppis]
+    iu.save_imgs(ppi_result, f"{output_path}/00_ppi_result", f"{file_name_pattern}_{{}}")
 
     # 骨格検出結果
     if ppis == None: 
@@ -209,8 +224,7 @@ def generate_scaled_gaze_img_debug(img, output_path, file_name_pattern):
             pd_result.append(ppi_with_landmarks)
     if pd_result == []:
         return
-    # iu.save_imgs(output_path, f"{file_name_pattern}_0_pd_result_{{}}", pd_result)
-    iu.save_imgs(pd_result, f"{output_path}/pd_result", f"{file_name_pattern}_{{}}")
+    iu.save_imgs(pd_result, f"{output_path}/01_pd_result", f"{file_name_pattern}_{{}}")
 
     collect_gaze_point_candidate = collect_gaze_point_candidates(ppis)
     if collect_gaze_point_candidate.size == 0:
@@ -218,10 +232,8 @@ def generate_scaled_gaze_img_debug(img, output_path, file_name_pattern):
     grouped_points = grouping_points(collect_gaze_point_candidate)
     centered_points = list(map(centering_points, grouped_points.values()))
     gaze_ppis = [ generate_ppi(img, cp[0], cp[1]-90) for cp in centered_points ]
-    # 注視点が画像中心の物だけにフィルタ
-    gaze_ppis = [ppi for ppi in gaze_ppis if is_gaze_img(ppi.get_ppi())]
 
-    # スケール前
+    # 注視画像結果
     if gaze_ppis == []: 
         return
     gaze_img = []
@@ -232,10 +244,11 @@ def generate_scaled_gaze_img_debug(img, output_path, file_name_pattern):
             gaze_img.append(ppi_with_landmarks)
     if gaze_img == []:
         return
-    # iu.save_imgs(output_path, f"{file_name_pattern}_1_before_scale_{{}}", gaze_img)
-    iu.save_imgs(gaze_img, f"{output_path}/gaze_img", f"{file_name_pattern}_{{}}")
+    iu.save_imgs(gaze_img, f"{output_path}/02_gaze_img", f"{file_name_pattern}_{{}}")
 
     scaled_ppis = list(filter(None, map(scaling_person_by_height, gaze_ppis)))
+    scaled_ppis = [ppi for ppi in scaled_ppis if is_gaze_img(ppi.get_ppi())]  # 被写体が中央かチェック
+
     # スケール後
     if scaled_ppis == []: 
         return
@@ -245,9 +258,8 @@ def generate_scaled_gaze_img_debug(img, output_path, file_name_pattern):
         if pose_detector_for_ppi.is_pose_detected():
             ppi_with_landmarks = pose_detector_for_ppi.draw_pose_landmarks()
             scaled_gaze_img.append(ppi_with_landmarks)
-    # iu.save_imgs(output_path, f"{file_name_pattern}_2_after_scale_{{}}", scaled_gaze_img)
-    iu.save_imgs(scaled_gaze_img, f"{output_path}/scaled_gaze_img", f"{file_name_pattern}_{{}}")  
-
+    iu.save_imgs(scaled_gaze_img, f"{output_path}/03_scaled_gaze_img", f"{file_name_pattern}_{{}}")  
+ 
     return [ppi.get_ppi() for ppi in scaled_ppis]
 
 def generate_bullettime_debug(query_img, imgs, output_path):
@@ -256,13 +268,16 @@ def generate_bullettime_debug(query_img, imgs, output_path):
     if query_img_cropped is None: return None
     for idx, img in enumerate(imgs):
         file_name_pattern = f"camera_{idx+1}"
+        # スケーリングした注視画像の生成
         candidate_imgs = generate_scaled_gaze_img_debug(img, output_path, file_name_pattern)
         if candidate_imgs is None: 
             continue
+        # クロップ画像の生成
         candidate_imgs_cropped = filter_none_from_img_list(map(generate_crop_img, candidate_imgs))
         if candidate_imgs_cropped == []:
             continue
-        iu.save_imgs(candidate_imgs_cropped, f"{output_path}/crop_img", f"{file_name_pattern}_{{}}", )
+        iu.save_imgs(candidate_imgs_cropped, f"{output_path}/04_crop_img", f"{file_name_pattern}_{{}}", )
+        # 類似画像検索
         most_similar_img_idx, most_similar_img = ssi.search_similar_img_by_colorhist(query_img_cropped, candidate_imgs_cropped)
         if most_similar_img_idx is None: 
             continue
@@ -277,17 +292,25 @@ def generate_bullettimes_debug(imgs, output_path):
     for idx, query_img in enumerate(query_imgs):
         bullettime = generate_bullettime_debug(query_img, imgs, output_path)
         if bullettime:
-            iu.save_imgs(bullettime, f"{output_path}/bullettime", file_name_pattern=f"bullettime_{idx}_{{}}")
+            iu.save_imgs(bullettime, f"{output_path}/05_bullettime", file_name_pattern=f"bullettime_{{}}")
 
+# Todo: 全体を分割する
 if __name__ == '__main__':
 
     import glob
     import os
+    import sys
 
-    input_path = "../input/tennis_serve"
-    output_path = f"../output/tennis_serve_bullettime"
+    # positions = ["center", "rightback", "serve"]
+    # for position in positions:
+    #     input_path = f"../input/tennis_{position}"
+    #     output_path = f"../output/tennis_{position}_bullettime_include_ppis"
+    #     img_paths = glob.glob(os.path.join(input_path, "*.jpg")) 
+
+    input_path = sys.argv[1]
+    output_path = sys.argv[2]
+
     img_paths = glob.glob(os.path.join(input_path, "*.jpg")) 
-
     imgs = []
     for img_path in img_paths:
         img = cv2.imread(img_path)

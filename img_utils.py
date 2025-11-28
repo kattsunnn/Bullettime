@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+import argparse
 
 def save_imgs(imgs, output_path, file_name_pattern=f"img_{{}}", expand=".jpg"):
     os.makedirs(output_path, exist_ok=True)
@@ -19,3 +20,18 @@ def show_imgs(imgs):
         cv2.imshow(win_name, img)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
+
+# def parse_io_args(description="入出力の共通引数を処理"):
+#     parser = argparse.ArgumentParser(description=description)
+#     parser.add_argument("-i", "--input", required=True, help="入力ファイルまたはフォルダのパス")
+#     parser.add_argument("-o", "--output", required=False, default="outputs", help="出力ディレクトリパス")
+#     args = parser.parse_args()
+
+#     # 絶対パスに変換
+#     input_path = os.path.abspath(args.input)
+#     output_dir = os.path.abspath(args.output)
+
+#     # 出力フォルダ作成
+#     os.makedirs(output_dir, exist_ok=True)
+
+#     return input_path, output_dir

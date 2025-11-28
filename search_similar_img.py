@@ -1,7 +1,6 @@
 import numpy as np
 import cv2
 
-
 # 仕様：単一画像・複数画像を処理可能
 def is_grayscale(imgs):
     # 単一画像をリストに変換
@@ -52,8 +51,6 @@ def ransac(query_keypoints, candidate_keypoints, matches, ransac_thresh=5.0):
 
     return inlier_matches
 
-# Todo: マッチングのアルゴリズムを確認
-# Todo: RANSACをする必要があるかも
 def search_most_similar_img_by_sift(query_img_gray, candidate_imgs_gray, ratio_thresh=0.75, ransac_thresh=0.5, match_thresh=5):
     if is_grayscale(query_img_gray):
         TypeError("クエリ画像にグレー画像を入力してください")
