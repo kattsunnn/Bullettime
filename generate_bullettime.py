@@ -31,7 +31,7 @@ def generate_front_ppis(img_e, fov=FOV, overlap=0.5):
     # 表示する透視投影画像の解像度
     dst_width = int(2.0 * np.tan(np.deg2rad(fov) / 2.0) * src_size_w / (2*np.pi))
     dst_height = int(2.0 * np.tan(np.deg2rad(fov) / 2.0) * src_size_h / np.pi)
-    view = E2P(src_size_w, src_size_h, dst_width, dst_height)
+    # view = E2P(src_size_w, src_size_h, dst_width, dst_height)
 
     THETA_RANGE = 90
     PHI_RANGE = 60
@@ -46,7 +46,8 @@ def generate_front_ppis(img_e, fov=FOV, overlap=0.5):
     for j, phi_eye in enumerate(phi_eyes):
         for i, theta_eye in enumerate(theta_eyes):
             # 透視投影画像の生成
-            view.generate_map(np.deg2rad(theta_eye), np.deg2rad(phi_eye), 0, 1)
+            view = get_or_create_map(src_size_w, src_size_h, dst_width, dst_height, 
+                                     theta_eye, phi_eye, fov)
             dst_img = view.generate_image(img_e)
             # 保存
             ppi = PPI(img_e, dst_img, theta_eye, phi_eye)
@@ -107,7 +108,7 @@ def centering_points(points):
     centered_point = np.mean(points, axis=0)
     return centered_point
 
-def is_gaze_img(img, threshold=0.1):
+def is_gaze_img(img, threshold=0.05):
     pose_detector = PD(img)
     if not pose_detector.is_pose_detected():
         return False
@@ -122,6 +123,7 @@ def is_gaze_img(img, threshold=0.1):
         return False
     return True
 
+# Todo: FOVが低下した場合はスケールからスケーリングを行う
 # 人が透視投影画像に1/kの高さで写る。例： k=2のとき、人が透視投影画像の1/2の高さになる
 def scaling_person_by_height(ppi, k=2):
     pose_detector_for_adjusted = PD(ppi.get_ppi())
@@ -130,17 +132,21 @@ def scaling_person_by_height(ppi, k=2):
         H_b = maxXY[1] - minXY[1]
         H_i = ppi.get_ppi_h()
         ppi_scale = H_i/(k * H_b)
-        # 解像度を一定に保ちたい場合。
-        # scaled_ppi = generate_ppi(  ppi.get_src_img(), 
-        #                             ppi.get_angle_u(),
-        #                             ppi.get_angle_v(),
-        #                             scale=ppi_scale) 
+
         # スケールに応じて解像度を自動調節
         scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
-        scaled_ppi = generate_ppi(  ppi.get_src_img(), 
-                                    ppi.get_angle_u(),
-                                    ppi.get_angle_v(),
-                                    fov= scaling_fov)
+        # 解像度が低下する場合は変更しない
+        if scaling_fov < FOV: 
+            scaled_ppi = generate_ppi(  ppi.get_src_img(), 
+                                        ppi.get_angle_u(),
+                                        ppi.get_angle_v(),
+                                        fov= scaling_fov)
+        else:
+            # 解像度を一定に保ちたい場合。
+            scaled_ppi = generate_ppi(  ppi.get_src_img(), 
+                                        ppi.get_angle_u(),
+                                        ppi.get_angle_v(),
+                                        scale=ppi_scale) 
         return scaled_ppi
     
 # 人が透視投影画像に1/kの面積で写る。例： k=2のとき、人が透視投影画像の1/2の面積になる
@@ -278,7 +284,9 @@ def generate_bullettime_debug(query_img, imgs, output_path):
             continue
         iu.save_imgs(candidate_imgs_cropped, f"{output_path}/04_crop_img", f"{file_name_pattern}_{{}}", )
         # 類似画像検索
-        most_similar_img_idx, most_similar_img = ssi.search_similar_img_by_colorhist(query_img_cropped, candidate_imgs_cropped)
+        query_img_cropped_gray = cv2.cvtColor(query_img_cropped, cv2.COLOR_BGR2GRAY)
+        candidate_imgs_cropped_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in candidate_imgs_cropped]
+        most_similar_img_idx, most_similar_img = ssi.search_most_similar_img_by_sift(query_img_cropped_gray, candidate_imgs_cropped_gray)
         if most_similar_img_idx is None: 
             continue
         query_img_cropped = most_similar_img
