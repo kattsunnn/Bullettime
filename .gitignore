@@ -1,5 +1,4 @@
 venv
-ref
-inputs
-outputs
-__pychache__/
+__pychache__
+.vscodes
+
