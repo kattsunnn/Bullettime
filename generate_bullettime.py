@@ -210,11 +210,15 @@ def generate_crop_img(img):
     if pose_detector.is_pose_detected():
         return pose_detector.crop_boundingbox()
 
-
 #Todo:カメラ番号を渡して、画像を出力する
 def generate_same_person_imgs(imgs, output_path):
     scaled_gaze_imgs_list = [generate_scaled_gaze_imgs(img, output_path, f"camera_{idx}") for idx, img in enumerate(imgs)]
+    # デバック
+    for idx, scaled_gaze_imgs in enumerate(scaled_gaze_imgs_list):
+        cropped_gaze_imgs = filter_none(map(generate_crop_img, scaled_gaze_imgs))
+        iu.save_imgs(cropped_gaze_imgs, f"{output_path}/04_cropped", f"camera_{idx}_{{}}")
 
+    #スケール画像とクロップ画像のペアを作成。processed_gaze_imgs_list[カメラ番号][画像番号]["scaled"or"cropped"]
     processed_gaze_imgs_list = []
     for cam_idx, imgs in enumerate(scaled_gaze_imgs_list):
         processed_gaze_imgs = []
@@ -235,14 +239,15 @@ def generate_same_person_imgs(imgs, output_path):
         for cand_imgs in cand_imgs_list:
             cand_imgs_cropped = [ img["cropped"] for img in cand_imgs]
             # most_similar_img_idx, most_similar_img = ssi.search_similar_img_by_colorhist(query_img_cropped, cand_imgs_cropped)
-            most_similar_img_idx, most_similar_img, matching_img = ssi.search_most_similar_img_by_sift(query_img_cropped, cand_imgs_cropped)
-            if most_similar_img_idx is None: continue
+            result = ssi.search_by_sift_ratiotest(query_img_cropped, cand_imgs_cropped)
+            if result is None: continue
+            most_similar_img_idx, most_similar_img, matching_img = result
             same_person_imgs.append(cand_imgs[most_similar_img_idx]["scaled"])
             matching_imgs.append(matching_img)
             query_img_cropped = most_similar_img
         print(len(same_person_imgs))
-        iu.save_imgs(same_person_imgs, f"{output_path}/04_same_person", f"person_{idx}_{{}}")
-        iu.save_imgs(matching_imgs, f"{output_path}/05_matching", f"person_{idx}_matching_{{}}")
+        iu.save_imgs(same_person_imgs, f"{output_path}/05_same_person", f"person_{idx}_{{}}")
+        iu.save_imgs(matching_imgs, f"{output_path}/06_matching", f"person_{idx}_matching_{{}}")
 
 
 # 中間結果を出力する
