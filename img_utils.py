@@ -5,8 +5,10 @@ import argparse
 
 def save_imgs(imgs, output_path, file_name_pattern=f"img_{{}}", expand=".jpg"):
     os.makedirs(output_path, exist_ok=True)
+    if isinstance(imgs, np.ndarray):
+        imgs = [imgs]
     for i, img in enumerate(imgs):
-        file_name = file_name_pattern.format(f"{i+1:04d}") + expand
+        file_name = file_name_pattern.format(f"{i:04d}") + expand
         file_path = os.path.join(output_path, file_name)
         cv2.imwrite(file_path, img)
         print(f"{file_path} を保存しました。")

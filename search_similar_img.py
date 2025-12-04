@@ -52,60 +52,30 @@ def ransac(query_keypoints, candidate_keypoints, matches, ransac_thresh=5.0):
 
     return inlier_matches
 
-def debug_matches(query_img, query_kp, cand_img, cand_kp, matches):
+def draw_matches(query_img, query_kp, cand_img, cand_kp, matches):
     matched_img = cv2.drawMatches(
         query_img, query_kp,
         cand_img, cand_kp,
-        matches[:20],  # 上位20個だけ描画
+        matches,  # 上位20個だけ描画
         None,
         flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
     )
-    iu.save_imgs(matched_img, f"../output/00_matched_img", f"matched_img_{{}}", )
+    return matched_img
 
-# def search_most_similar_img_by_sift(query_img_gray, candidate_imgs_gray, ratio_thresh=0.75, ransac_thresh=0.5, match_thresh=5):
-#     if is_grayscale(query_img_gray):
-#         TypeError("クエリ画像にグレー画像を入力してください")
-#     if is_grayscale(candidate_imgs_gray):
-#         TypeError("候補画像にグレー画像を入力してください")
-#     sift = cv2.SIFT_create()
-#     bf_matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True) # CrossCheckにより、マッチングを1対1に限定
-#     max_matches = -1
-#     most_similar_img_idx = None
-#     most_similar_img = None
-#     # クエリ画像の特徴抽出
-#     query_keypoints, query_descriptors = sift.detectAndCompute(query_img_gray, None)
-#     if not has_enough_keypoints(query_keypoints): return None
-#     # 候補画像群と比較
-#     for idx, candidate_img_gray in enumerate(candidate_imgs_gray):
-#         # 候補画像の特徴抽出
-#         candidate_keypoints, candidate_descriptors = sift.detectAndCompute(candidate_img_gray, None)
-#         if not has_enough_keypoints(candidate_keypoints): return None
-#         # k個の最近傍を返す
-#         matches = bf_matcher.knnMatch(query_descriptors, candidate_descriptors, k=2)
-#         ratio_inliers = [
-#             m for m, n in matches
-#             if ratio_test(m.distance, n.distance, ratio_thresh)
-#         ]
-#         ransac_inliers = (query_keypoints, candidate_keypoints, ratio_inliers, ransac_thresh)
-#         num_of_matches = len(ransac_inliers)
-#         print(f"num_of_matches: {num_of_matches}")
-#         # 類似画像の更新
-#         if num_of_matches > max_matches and num_of_matches >= match_thresh:
-#             max_matches = num_of_matches
-#             most_similar_img_idx = idx
-#             most_similar_img = candidate_img_gray
-#     return most_similar_img_idx, most_similar_img
-
-def search_most_similar_img_by_sift(query_img_gray, candidate_imgs_gray, ransac_thresh=0.5, match_thresh=5):
-    if is_colorscale(query_img_gray):
-        raise TypeError("クエリ画像にグレー画像を入力してください")
-    if is_colorscale(candidate_imgs_gray):
-        raise TypeError("候補画像にグレー画像を入力してください")
+def search_most_similar_img_by_sift(query_img_BGR, candidate_imgs_BGR, ratio_thresh=0.75, ransac_thresh=0.5, match_thresh=5):
+    if is_grayscale(query_img_BGR):
+        raise TypeError("クエリ画像にBGR画像を入力してください")
+    if is_grayscale(candidate_imgs_BGR):
+        raise TypeError("候補画像にBGR画像を入力してください")
+    query_img_gray = cv2.cvtColor(query_img_BGR, cv2.COLOR_BGR2GRAY)
+    candidate_imgs_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in candidate_imgs_BGR]
     sift = cv2.SIFT_create()
-    bf_matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True) # CrossCheckにより、マッチングを1対1に限定
+    bf_matcher = cv2.BFMatcher(cv2.NORM_L2) # CrossCheckにより、マッチングを1対1に限定
     max_matches = -1
     most_similar_img_idx = None
     most_similar_img = None
+    most_similar_img_keypoints = None
+    most_similar_img_matches = None
     # クエリ画像の特徴抽出
     query_keypoints, query_descriptors = sift.detectAndCompute(query_img_gray, None)
     if not has_enough_keypoints(query_keypoints): return None
@@ -115,21 +85,70 @@ def search_most_similar_img_by_sift(query_img_gray, candidate_imgs_gray, ransac_
         candidate_keypoints, candidate_descriptors = sift.detectAndCompute(candidate_img_gray, None)
         if not has_enough_keypoints(candidate_keypoints): return None
         # k個の最近傍を返す
-        matches = bf_matcher.match(query_descriptors, candidate_descriptors)
-        ransac_inliers = (query_keypoints, candidate_keypoints, matches, ransac_thresh)
+        matches = bf_matcher.knnMatch(query_descriptors, candidate_descriptors, k=2)
+        ratio_inliers = [
+            m for m, n in matches
+            if ratio_test(m.distance, n.distance, ratio_thresh)
+        ]
+        ransac_inliers = (query_keypoints, candidate_keypoints, ratio_inliers, ransac_thresh)
         num_of_matches = len(ransac_inliers)
         print(f"num_of_matches: {num_of_matches}")
-        # 類似画像の更新
-        if num_of_matches > max_matches and num_of_matches >= match_thresh:
-            max_matches = num_of_matches
-            most_similar_img_idx = idx
-            most_similar_img = candidate_img_gray
-            most_similar_img_keypoints = candidate_keypoints
-            most_similar_img_matches = matches
-    debug_matches(query_img_gray, query_keypoints, 
-                 most_similar_img, most_similar_img_keypoints, 
-                 most_similar_img_matches)
-    return most_similar_img_idx, most_similar_img
+    # 類似画像の更新
+    if num_of_matches > max_matches and num_of_matches >= match_thresh:
+        max_matches = num_of_matches
+        most_similar_img_idx = idx
+        most_similar_img = candidate_img_gray
+        most_similar_img_keypoints = candidate_keypoints
+        most_similar_img_matches = ransac_inliers
+    if most_similar_img_idx is None:
+        return None, None
+    else:
+        matching_img = draw_matches(    query_img_gray, query_keypoints, 
+                                        most_similar_img, most_similar_img_keypoints, 
+                                        most_similar_img_matches    )
+        return most_similar_img_idx, candidate_imgs_BGR[most_similar_img_idx], matching_img
+
+# def search_most_similar_img_by_sift(query_img_BGR, candidate_imgs_BGR, ransac_thresh=0.5, match_thresh=3):
+#     if is_grayscale(query_img_BGR):
+#         raise TypeError("クエリ画像にBGR画像を入力してください")
+#     if is_grayscale(candidate_imgs_BGR):
+#         raise TypeError("候補画像にBGR画像を入力してください")
+#     query_img_gray = cv2.cvtColor(query_img_BGR, cv2.COLOR_BGR2GRAY)
+#     candidate_imgs_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in candidate_imgs_BGR]
+#     sift = cv2.SIFT_create()
+#     bf_matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True) # CrossCheckにより、マッチングを1対1に限定
+#     max_matches = -1
+#     most_similar_img_idx = None
+#     most_similar_img = None
+#     most_similar_img_keypoints = None
+#     most_similar_img_matches = None
+#     # クエリ画像の特徴抽出
+#     query_keypoints, query_descriptors = sift.detectAndCompute(query_img_gray, None)
+#     if not has_enough_keypoints(query_keypoints): return None
+#     # 候補画像群と比較
+#     for idx, candidate_img_gray in enumerate(candidate_imgs_gray):
+#         # 候補画像の特徴抽出
+#         candidate_keypoints, candidate_descriptors = sift.detectAndCompute(candidate_img_gray, None)
+#         if not has_enough_keypoints(candidate_keypoints):  continue
+#         # k個の最近傍を返す
+#         matches = bf_matcher.match(query_descriptors, candidate_descriptors)
+#         ransac_inliers = ransac(query_keypoints, candidate_keypoints, matches, ransac_thresh)
+#         num_of_matches = len(ransac_inliers)
+#         print(f"num_of_matches: {num_of_matches}")
+#         # 類似画像の更新
+#         if num_of_matches > max_matches and num_of_matches >= match_thresh:
+#             max_matches = num_of_matches
+#             most_similar_img_idx = idx
+#             most_similar_img = candidate_img_gray
+#             most_similar_img_keypoints = candidate_keypoints
+#             most_similar_img_matches = ransac_inliers
+#     if most_similar_img_idx is None:
+#         return None, None
+#     else:
+#         matching_img = draw_matches(    query_img_gray, query_keypoints, 
+#                                         most_similar_img, most_similar_img_keypoints, 
+#                                         most_similar_img_matches    )
+#         return most_similar_img_idx, candidate_imgs_BGR[most_similar_img_idx], matching_img
 
 def normalize_L1_flatten(vec):
     vec_norm = cv2.normalize(vec, None, norm_type=cv2.NORM_L1).flatten()
@@ -142,7 +161,7 @@ def normalize_L1_flatten(vec):
 #     return score_norm
 
 # 画像間で違う領域が含まれる場合、スコアが大きく低下してしまう。
-def search_similar_img_by_colorhist(query_img_BGR, candidate_imgs_BGR):
+def search_most_similar_img_by_colorhist(query_img_BGR, candidate_imgs_BGR):
     if is_grayscale(query_img_BGR):
         raise TypeError("クエリ画像にBGR画像を入力してください")
     if is_grayscale(candidate_imgs_BGR):
