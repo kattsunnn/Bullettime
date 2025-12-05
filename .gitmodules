@@ -1,3 +1,6 @@
 [submodule "img_utils"]
 	path = img_utils
 	url = git@github.com:kattsunnn/img_utils.git
+[submodule "super_resolution"]
+	path = super_resolution
+	url = git@github.com:kattsunnn/super_resolution.git

@@ -7,7 +7,8 @@ from e2p import E2P
 from pd import PD
 from ppi import PPI
 import search_similar_img as ssi
-import img_utils as iu
+import img_utils.img_utils as iu
+import super_resolution.super_resolution as sr
 
 FOV = 30
 _map_cache = {}
@@ -183,6 +184,9 @@ def generate_scaled_gaze_imgs(img, output_path, file_name_pattern):
     ppis_pose = filter_none(map(detect_and_draw_pose, ppis_raw))
     if ppis_pose: iu.save_imgs(ppis_pose, f"{output_path}/01_ppi_pose", f"{file_name_pattern}_{{}}")
 
+    # model_path = "super_resolution/models/EDSR_x4.pb"
+    # ppis = [ PPI(ppi.get_src_img(), sr.edsr_x4(ppi.get_ppi(), model_path), ppi.get_angle_u(), ppi.get_angle_v()) for ppi in ppis ]
+
     # 注視画像を生成
     collect_gaze_point_candidate = collect_gaze_point_candidates(ppis)
     if collect_gaze_point_candidate.size == 0: return None
@@ -229,16 +233,19 @@ def generate_same_person_imgs(imgs, output_path):
         if processed_gaze_imgs:
             processed_gaze_imgs_list.append(processed_gaze_imgs)
 
+    # model_pahth = "super_resolution/models/EDSR_x4.pb"
+
     if processed_gaze_imgs_list[0]:
         query_imgs_cropped = [img["cropped"] for img in processed_gaze_imgs_list[0] ]
+        # query_imgs_cropped = [ sr.edsr_x4(img["cropped"], model_pahth) for img in processed_gaze_imgs_list[0] ]
         cand_imgs_list = processed_gaze_imgs_list
 
     for idx, query_img_cropped in enumerate(query_imgs_cropped):
         same_person_imgs = []
         matching_imgs = []
         for cand_imgs in cand_imgs_list:
-            cand_imgs_cropped = [ img["cropped"] for img in cand_imgs]
-            # most_similar_img_idx, most_similar_img = ssi.search_similar_img_by_colorhist(query_img_cropped, cand_imgs_cropped)
+            cand_imgs_cropped = [img["cropped"] for img in cand_imgs ]
+            # cand_imgs_cropped = [ sr.edsr_x4(img["cropped"], model_pahth) for img in cand_imgs]
             result = ssi.search_by_sift_ratiotest(query_img_cropped, cand_imgs_cropped)
             if result is None: continue
             most_similar_img_idx, most_similar_img, matching_img = result
@@ -349,6 +356,8 @@ if __name__ == '__main__':
     input_path = sys.argv[1]
     output_path = sys.argv[2]
     imgs_path = glob.glob(os.path.join(input_path, "*.jpg")) 
+    imgs_path.sort()
+    print(imgs_path)
     imgs = [cv2.imread(img_path) for img_path in imgs_path ]
 
     generate_same_person_imgs(imgs, output_path)
